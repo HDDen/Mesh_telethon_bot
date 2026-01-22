@@ -143,9 +143,35 @@ async def on_new_message(event):
 
     # собираем данные
     if worker_params:
+        msg_text = ""
+
+        msg_media = getattr(msg, "media", None)
+        msg_file = getattr(msg, "file", None)
+        msg_photo = getattr(msg, "photo", None)
+        
+        if getattr(msg_media, "video", None):
+            msg_text = "Отправлено видео"
+            duration = getattr(msg_file, "duration", None)
+            if duration:
+                msg_text = msg_text + " длит. " + str(int(duration)) + " сек."
+        elif getattr(msg_media, "voice", None):
+            msg_text = "Отправлен войс"
+            duration = getattr(msg_file, "duration", None)
+            if duration:
+                msg_text = msg_text + " длит. " + str(int(duration)) + " сек."
+        elif msg_photo:
+            msg_text = "Отправлена картинка"
+
+        # добавляем текст - в виде подписи или самостоятельно
+        if getattr(msg, "text", None):
+            if msg_text:
+                msg_text = msg_text + " с подписью: "+msg.text
+            else:
+                msg_text = msg.text
+
         data = {
             "message": {
-                "text": msg.text,
+                "text": msg_text,
                 "message_id": msg.id,
                 "chat": {
                     "id": chat.id,
@@ -174,6 +200,9 @@ async def on_new_message(event):
 
     else:
         pass
+
+async def on_edited_message(event):
+    await on_new_message(event)
 
 # отправка json с апдейтом во внешнюю систему
 def send_to_extmsngr(url, payload, worker_params):
@@ -412,6 +441,7 @@ async def main():
             return
     
         client.add_event_handler(on_new_message, events.NewMessage)
+        client.add_event_handler(on_edited_message, events.MessageEdited)
         # client.add_event_handler(
         #     partial(on_new_message, extra_data=my_data),
         #     events.NewMessage
