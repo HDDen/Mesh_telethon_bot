@@ -1,0 +1,5 @@
+*.session
+*.session-journal
+mesh_telethon_config.json
+.vscode/launch.json
+__pycache__/*
