@@ -279,10 +279,12 @@ def run_pre_poll_and_reply_polling(client, loop):
                         resp = requests.get(url, timeout=10, verify=verify_ssl)
                         if resp.status_code == 200:
                             data = resp.json()  # ← здесь уже dict
-                            print("Получены данные:", data)
 
                             # пример: преобразование сообщений в словари
                             messages = data.get("messages", [])
+                            if messages:
+                                print("Получены данные:", data)
+
                             for msg in messages:
                                 msg_dict = {
                                     #"name": msg.get("name"),
