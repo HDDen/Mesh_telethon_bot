@@ -123,15 +123,15 @@ async def on_new_message(event):
         for worker_index, worker_cfg in enumerate(tg_chats_configs):
             try:
                 worker_chat_id = str(worker_cfg.get("chat_id", ""))
-                if worker_chat_id == str(chat.id):
+                if worker_chat_id == str(getattr(chat, "id", None)):
                     worker_params = worker_cfg
-                elif worker_chat_id == str(chat.username):
+                elif worker_chat_id == str(getattr(chat, "username", None)):
                     worker_params = worker_cfg
                     chat.id = str(chat.username)
-                elif worker_chat_id == "@"+str(chat.username):
+                elif worker_chat_id == "@"+str(getattr(chat, "username", None)):
                     worker_params = worker_cfg
-                    chat.id = "@"+str(chat.username)
-                elif worker_chat_id == "-100"+str(chat.id):
+                    chat.id = "@"+str(getattr(chat, "username", None))
+                elif worker_chat_id == "-100"+str(getattr(chat, "id", None)):
                     chat.id = "-100"+str(chat.id)
                     worker_params = worker_cfg
 
