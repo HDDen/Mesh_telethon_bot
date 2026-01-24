@@ -456,8 +456,8 @@ def do_post_request(url: str, payload: Optional[dict] = None, timeout: int = 10,
             print("do_post_request(): ответ не является JSON: %s", resp.text[:500])
             result = resp.text
 
-    except requests.exceptions.RequestException:
-        print("do_post_request(): POST завершился с ошибкой или таймаутом")
+    except Exception as e:
+        print(f"do_post_request(): POST завершился с ошибкой или таймаутом: \n{e}")
         result = None
 
     return result
