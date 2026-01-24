@@ -39,11 +39,11 @@ DEFAULT_CONFIG = {
             "chat_id": "", # id чата - например, -100555555555
             "chat_alias_faked": "", # просто ярлык для удобства. Ни на что не влияет
             "http_extpoll_token": "", # токен для получения сообщений и prepoll
-            "http_send_token": "", # токен для отправки телеграмм-сообщений в меш через php-бэкенд, должен совпадать с TG_SUBSCRIBE_TOKEN со стороны бэкенда
+            "http_send_token": "", # токен для отправки телеграмм-сообщений в меш через php-бэкенд, должен совпадать с TG_SUBSCRIBE_TOKEN со стороны бэкенда. Его можно указать в самой ссылке send_updates_to в виде get-параметра, в целях совместимости с апдейтом от телеграм, а здесь - не указывать. Его область действия - только на отправку из телеграм в меш
             "prepoll_url": [ # эти коллбэки выполняются перед запуском скрипта
                 # "", ""
             ], 
-            "send_updates_to": "", # куда сгружать полученные от TG обновления, https://... Отправляется POST с телом {"message": {"text": "...", "message_id": "...", chat: {"id": "..."}, "from": {"username": "...", "first_name": "...", "last_name": "..."}, "date": ...unix}}
+            "send_updates_to": "https://...?token=aaaaaa", # куда сгружать полученные от TG обновления, https://... Отправляется POST с телом {"token": "...", "message": {"text": "...", "message_id": "...", chat: {"id": "..."}, "from": {"username": "...", "first_name": "...", "last_name": "..."}, "date": ...unix}}. Токен можено передать не в JSON-теле, а в get-параметре, указав его в самой ссылке 
             "poll_replies_from": "", # откуда забирать ответные сообщения, отправляемые в TG https://... Ожидается ответ вида {"messages":[{"name":"Alice","date":"18.01 19:44","msg":"Foo","chat_id": "-10055555555"},{"name":"Bob","date":"18.01 19:44","msg":"Bar","chat_id": "-10055555555"}]}
             "poll_period_seconds": 30, # период, с которым опрашивается poll_replies_from
             "http_ignore_ssl_errors": False, 
@@ -213,14 +213,10 @@ def send_to_extmsngr(url, payload, worker_params):
     result = False
 
     verify_ssl = not bool(worker_params.get("http_ignore_ssl_errors", False))
-    http_send_token = not bool(worker_params.get("http_send_token", ""))
+    http_send_token = worker_params.get("http_send_token", "")
 
     if not url:
         print("send_to_extmsngr(): url не задан - отправка во внешнюю систему пропущена")
-        return result
-    
-    if not http_send_token:
-        print("send_to_extmsngr(): http_send_token не задан - отправка во внешнюю систему пропущена")
         return result
     
     # добавим токен в post
