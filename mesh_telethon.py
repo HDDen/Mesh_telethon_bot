@@ -13,6 +13,7 @@ import logging
 import threading
 import time
 from functools import partial
+from typing import Any, Dict, Optional, Iterable, List, Union
 logging.basicConfig(format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s',
                     level=logging.WARNING)
 
@@ -37,10 +38,12 @@ DEFAULT_CONFIG = {
         {
             "chat_id": "", # id чата - например, -100555555555
             "chat_alias_faked": "", # просто ярлык для удобства. Ни на что не влияет
+            "http_extpoll_token": "", # токен для получения сообщений и prepoll
+            "http_send_token": "", # токен для отправки телеграмм-сообщений в меш через php-бэкенд, должен совпадать с TG_SUBSCRIBE_TOKEN со стороны бэкенда. Его можно указать в самой ссылке send_updates_to в виде get-параметра, в целях совместимости с апдейтом от телеграм, а здесь - не указывать. Его область действия - только на отправку из телеграм в меш
             "prepoll_url": [ # эти коллбэки выполняются перед запуском скрипта
                 # "", ""
             ], 
-            "send_updates_to": "", # куда сгружать полученные от TG обновления, https://... Отправляется POST с телом {"message": {"text": "...", "message_id": "...", chat: {"id": "..."}, "from": {"username": "...", "first_name": "...", "last_name": "..."}, "date": ...unix}}
+            "send_updates_to": "https://...?token=aaaaaa", # куда сгружать полученные от TG обновления, https://... Отправляется POST с телом {"token": "...", "message": {"text": "...", "message_id": "...", chat: {"id": "..."}, "from": {"username": "...", "first_name": "...", "last_name": "..."}, "date": ...unix}}. Токен можено передать не в JSON-теле, а в get-параметре, указав его в самой ссылке 
             "poll_replies_from": "", # откуда забирать ответные сообщения, отправляемые в TG https://... Ожидается ответ вида {"messages":[{"name":"Alice","date":"18.01 19:44","msg":"Foo","chat_id": "-10055555555"},{"name":"Bob","date":"18.01 19:44","msg":"Bar","chat_id": "-10055555555"}]}
             "poll_period_seconds": 30, # период, с которым опрашивается poll_replies_from
             "http_ignore_ssl_errors": False, 
@@ -210,28 +213,24 @@ def send_to_extmsngr(url, payload, worker_params):
     result = False
 
     verify_ssl = not bool(worker_params.get("http_ignore_ssl_errors", False))
+    http_send_token = worker_params.get("http_send_token", "")
 
     if not url:
         print("send_to_extmsngr(): url не задан - отправка во внешнюю систему пропущена")
         return result
+    
+    # добавим токен в post
+    payload["token"] = http_send_token
 
+    # и отправим запрос
     try:
-        print("Отправка сообщения во внешнюю систему: \n", payload)
-        resp = requests.post(
-            url,
-            json=payload,
-            timeout=10,
-            verify=verify_ssl
-        )
-        if resp.status_code == 200:
+        print("Отправка сообщения во внешнюю систему: \n", protect_dict_values(payload, ["token"], "***"))
+        resp = do_post_request(url, payload, 10, verify_ssl)
+        if resp:
             print("Сообщение успешно отправлено во внешнюю систему.\n")
             result = True
         else:
-            print(
-                "External POST вернул статус %s: %s\n",
-                resp.status_code,
-                resp.text[:200],
-            )
+            print("Неуспешная отправка сообщения в внешнюю систему resp=", resp)
             result = False
     except Exception as exc:
         print(
@@ -254,6 +253,8 @@ def run_pre_poll_and_reply_polling(client, loop):
         verify_ssl = not bool(worker_cfg.get("http_ignore_ssl_errors", False))
 
         # --- PREPOLL ---
+        http_extpoll_token = worker_cfg.get("http_extpoll_token")
+
         prepoll_urls = worker_cfg.get("prepoll_url")
         if isinstance(prepoll_urls, list):
             print("Запуск prepoll_url...")
@@ -261,8 +262,18 @@ def run_pre_poll_and_reply_polling(client, loop):
                 if url:
                     try:
                         print(f"PREPOLL запрос: {url}")
-                        resp = requests.get(url, timeout=10, verify=verify_ssl)
-                        print(f"Ответ {resp.status_code}: {resp.text[:200]}")
+                        # выполняем запрос
+                        payload = {
+                            "token": http_extpoll_token
+                        }
+                        resp = do_post_request(url, payload, 10, verify_ssl)
+                        if resp:
+                            if isinstance(resp, dict):
+                                print("HTTP pre-poll JSON ответ:\n%s", json.dumps(resp, ensure_ascii=False, indent=2))
+                            else:
+                                print("HTTP pre-poll ответ не является JSON: %s", resp)
+                        else:
+                            print("HTTP pre-poll запрос неудачный: resp=", resp)
                     except Exception as e:
                         print(f"Ошибка prepoll запроса {url}: {e}")
 
@@ -276,32 +287,37 @@ def run_pre_poll_and_reply_polling(client, loop):
             def poll_loop(url, period, worker_cfg):
                 while True:
                     try:
-                        resp = requests.get(url, timeout=10, verify=verify_ssl)
-                        if resp.status_code == 200:
-                            data = resp.json()  # ← здесь уже dict
+                        # выполняем запрос
+                        payload = {
+                            "token": http_extpoll_token
+                        }
+                        resp = do_post_request(url, payload, 10, verify_ssl)
+                        if resp:
+                            if isinstance(resp, dict):
 
-                            # пример: преобразование сообщений в словари
-                            messages = data.get("messages", [])
-                            if messages:
-                                print("Получены данные:", data)
+                                # пример: преобразование сообщений в словари
+                                messages = resp.get("messages", [])
+                                if messages:
+                                    print("Получены данные:", resp)
 
-                            for msg in messages:
-                                msg_dict = {
-                                    #"name": msg.get("name"),
-                                    "date": msg.get("date"),
-                                    "msg": msg.get("msg"),
-                                    "chat_id": msg.get("chat_id"),
-                                }
-                                print("Сообщение:", msg_dict)
+                                for msg in messages:
+                                    msg_dict = {
+                                        #"name": msg.get("name"),
+                                        "date": msg.get("date"),
+                                        "msg": msg.get("msg"),
+                                        "chat_id": msg.get("chat_id"),
+                                    }
+                                    print("Сообщение:", msg_dict)
 
-                                # отправка в Telegram
-                                asyncio.run_coroutine_threadsafe(
-                                    send_to_telegram(client, msg_dict, worker_cfg),
-                                    loop
-                                )
-
+                                    # отправка в Telegram
+                                    asyncio.run_coroutine_threadsafe(
+                                        send_to_telegram(client, msg_dict, worker_cfg),
+                                        loop
+                                    )
+                            else:
+                                print("Ответ получен, но это не json", resp)
                         else:
-                            print(f"Polling вернул статус {resp.status_code}: {resp.text[:200]}")
+                            print(f"Polling завершился с ошибкой")
                     except Exception as e:
                         print(f"Ошибка polling запроса {url}: {e}")
 
@@ -404,6 +420,47 @@ def normalize_chat_id(value):
         return v
 
     return value
+
+# заменяет значения переданных ключей в плоском объекте на плейсхолдер, полезно для последующего вывода в лог
+def protect_dict_values(src_dict: dict, keys_list: list, placeholder: str = "***"):
+
+    for_log = src_dict.copy()
+
+    if keys_list:
+        for index, item in enumerate(keys_list):
+            for_log[item] = '***'
+    
+    return for_log
+
+# выполняет POST-запрос, отправляет переданный json, при успехе возвращает ответ в виде dict
+# При ошибке возвращает None
+def do_post_request(url: str, payload: Optional[dict] = None, timeout: int = 10, verify_ssl: bool = True) -> Optional[Union[dict, str]]:
+
+    result = None
+
+    if payload is None:
+        payload = {}
+
+    try:
+        resp = requests.post(
+            url,
+            json=payload,
+            timeout=timeout,
+            verify=verify_ssl
+        )
+        resp.raise_for_status() # проверка if resp.status_code == 200: не нужна, raise_for_status() выбрасывает исключение requests.exceptions.HTTPError, если статус-код 4xx или 5xx (ошибка клиента или сервера).
+
+        try:
+            result = resp.json()
+        except ValueError:
+            print("do_post_request(): ответ не является JSON: %s", resp.text[:500])
+            result = resp.text
+
+    except Exception as e:
+        print(f"do_post_request(): POST завершился с ошибкой или таймаутом: \n{e}")
+        result = None
+
+    return result
 
 # основная запускаемая функция
 async def main():
