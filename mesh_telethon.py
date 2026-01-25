@@ -12,6 +12,7 @@ from telethon.tl.types import User, Chat, Channel
 import logging
 import threading
 import time
+import hashlib
 from functools import partial
 from typing import Any, Dict, Optional, Iterable, List, Union
 logging.basicConfig(format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s',
@@ -49,6 +50,7 @@ DEFAULT_CONFIG = {
             "http_ignore_ssl_errors": False, 
         },
     ],
+    "sent_to_tg_cache_ttl": 600, # возможна ситуация, в которой одно сообщение может быть отправлено в тг несколькими воркерами, таким образом задвоив его. Чтобы этого не произошло, используется кэш _sent_to_tg_messages_cache, хранящий хэши отправленных сообщений. Настройка sent_to_tg_cache_ttl указывает, сколько времени хранить каждый хэш
 }
 
 def load_or_create_config(path: str) -> dict:
@@ -86,9 +88,11 @@ proxy_username = _config.get("proxy_username", DEFAULT_CONFIG["proxy_username"])
 proxy_password = _config.get("proxy_password", DEFAULT_CONFIG["proxy_password"])
 proxy_rdns = bool(_config.get("proxy_rdns", DEFAULT_CONFIG["proxy_rdns"]))
 tg_chats_configs = _config.get("tg_chats_configs", DEFAULT_CONFIG["tg_chats_configs"]) or None
+sent_to_tg_cache_ttl = int(_config.get("sent_to_tg_cache_ttl", DEFAULT_CONFIG["sent_to_tg_cache_ttl"]))
 
-# class MeshTelethon:
-#    def __init__(self, meshcore, worker_index, config) -> None:
+# кэш отправленных сообщений из poll в tg для дедупликации
+_sent_to_tg_messages_cache: Dict[str, float] = {}
+_sent_to_tg_messages_cache_lock = asyncio.Lock()
 
 # узнает тип чата по полученному чату
 def get_chat_type(chat):
@@ -345,60 +349,82 @@ async def send_to_telegram(client, msg_dict: dict, passed_worker_cfg: dict):
 
     result = False
 
-    # извлечем текст сообщения
-    msg_text = str(msg_dict.get("msg", ""))
+    # вычислим хэш сообщения чтобы понять, нужно ли отправлять его в telegram
+    already_sent = False
+    msg_key = _make_message_key(msg_dict)
 
-    worker_params_from_msg = False
+    # проверка в кэше
+    async with _sent_to_tg_messages_cache_lock:
+        await _cleanup_sent_to_tg_messages_cache()
 
-    # извлечем chat_id от сообщения
-    msg_chat_id = ""
-    if msg_dict:
-        msg_chat_id = str(msg_dict.get("chat_id", ""))
+        if msg_key in _sent_to_tg_messages_cache:
+            # Сообщение уже отправлялось
+            already_sent = True
 
-    # здесь будет целевой chat_id
-    worker_chat_id = ""
+        # резервируем ключ заранее, чтобы другие корутины не отправили дубль
+        _sent_to_tg_messages_cache[msg_key] = time.time()
 
-    if tg_chats_configs:
-        for worker_index, worker_cfg in enumerate(tg_chats_configs):
-            try:
-                temporary_worker_chat_id = str(worker_cfg.get("chat_id", ""))
-                if temporary_worker_chat_id == msg_chat_id:
-                    worker_params_from_msg = worker_cfg
-                    worker_chat_id = temporary_worker_chat_id
-                    print("send_to_telegram(): нашли конфиг для этого chat_id")
-                elif temporary_worker_chat_id == "-100"+msg_chat_id:
-                    # удалим -100 из chat_id воркера
-                    if isinstance(temporary_worker_chat_id, str) and temporary_worker_chat_id.startswith("-100"):
-                        worker_chat_id = temporary_worker_chat_id[4:]
-                        worker_params_from_msg = worker_cfg
-                        print("send_to_telegram(): нашли конфиг для этого chat_id, но с удалением -100")
+    # проверка прошла, уведомим пользователя
+    if not already_sent:
 
-            except Exception as e:
-                print(f"Произошла ошибка: {e}")
-                # tb = traceback.format_exc()
-                # print(tb)
-                break
-    else:
+        # извлечем текст сообщения
+        # msg_dict представляет собой объект {'date': '25.01 14:30', 'msg': 'Текст сообщения', 'chat_id': '-10055555555555'}
+        msg_text = str(msg_dict.get("msg", ""))
+
+        worker_params_from_msg = False
+
+        # извлечем chat_id от сообщения
+        msg_chat_id = ""
+        if msg_dict:
+            msg_chat_id = str(msg_dict.get("chat_id", ""))
+
+        # здесь будет целевой chat_id
         worker_chat_id = ""
-        if passed_worker_cfg:
-            worker_chat_id = str(passed_worker_cfg.get("chat_id", ""))
-            print("send_to_telegram(): откатили chat_id к passed_worker_cfg-версии")
+
+        if tg_chats_configs:
+            for worker_index, worker_cfg in enumerate(tg_chats_configs):
+                try:
+                    temporary_worker_chat_id = str(worker_cfg.get("chat_id", ""))
+                    if temporary_worker_chat_id == msg_chat_id:
+                        worker_params_from_msg = worker_cfg
+                        worker_chat_id = temporary_worker_chat_id
+                        print("send_to_telegram(): нашли конфиг для этого chat_id")
+                    elif temporary_worker_chat_id == "-100"+msg_chat_id:
+                        # удалим -100 из chat_id воркера
+                        if isinstance(temporary_worker_chat_id, str) and temporary_worker_chat_id.startswith("-100"):
+                            worker_chat_id = temporary_worker_chat_id[4:]
+                            worker_params_from_msg = worker_cfg
+                            print("send_to_telegram(): нашли конфиг для этого chat_id, но с удалением -100")
+
+                except Exception as e:
+                    print(f"Произошла ошибка: {e}")
+                    # tb = traceback.format_exc()
+                    # print(tb)
+                    break
+        else:
+            worker_chat_id = ""
+            if passed_worker_cfg:
+                worker_chat_id = str(passed_worker_cfg.get("chat_id", ""))
+                print("send_to_telegram(): откатили chat_id к passed_worker_cfg-версии")
 
 
-    # вероятно, нашли worker_chat_id, проверяем соответствие и отправляем
-    if msg_chat_id and worker_chat_id and msg_chat_id == worker_chat_id:
-        try:
-            send_result = await client.send_message(normalize_chat_id(msg_chat_id), msg_text)
-            print(f"send_to_telegram(): сообщение отправлено, id={send_result.id}")
-            if send_result.id:
-                result = True
-            else:
+        # вероятно, нашли worker_chat_id, проверяем соответствие и отправляем
+        if msg_chat_id and worker_chat_id and msg_chat_id == worker_chat_id:
+            try:
+                send_result = await client.send_message(normalize_chat_id(msg_chat_id), msg_text)
+                print(f"send_to_telegram(): сообщение отправлено, id={send_result.id}")
+                if send_result.id:
+                    result = True
+                else:
+                    result = False
+            except Exception as e:
+                print(f"send_to_telegram(): ошибка отправки: {e}")
                 result = False
-        except Exception as e:
-            print(f"send_to_telegram(): ошибка отправки: {e}")
+        else:
+            print("send_to_telegram(): msg_chat_id != worker_chat_id, или одно из них - пустое")
             result = False
     else:
-        print("send_to_telegram(): msg_chat_id != worker_chat_id, или одно из них - пустое")
+        print("send_to_telegram(): already_sent = True, уже отправляли сообщение, пропускаем")
         result = False
 
     return result
@@ -461,6 +487,22 @@ def do_post_request(url: str, payload: Optional[dict] = None, timeout: int = 10,
         result = None
 
     return result
+
+# возвращает хэш сообщения из chat_id, даты и текста
+def _make_message_key(msg_dict: dict) -> str:
+    raw = f"{msg_dict.get('chat_id','')}|{msg_dict.get('date','')}|{msg_dict.get('msg','')}"
+    normalized = " ".join(raw.split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+# функция для поиска и удаления устаревших хэшей из кэша отправленных в tg сообщений
+async def _cleanup_sent_to_tg_messages_cache():
+    now = time.time()
+    expired_keys = [
+        key for key, ts in _sent_to_tg_messages_cache.items()
+        if now - ts > sent_to_tg_cache_ttl
+    ]
+    for key in expired_keys:
+        del _sent_to_tg_messages_cache[key]
 
 # основная запускаемая функция
 async def main():
