@@ -8,9 +8,9 @@ Python-скрипт для трансляции сообщений в/из Teleg
 > 
 > Hello! I'm going to use automation on my Telegram account using the Telethon python library. The account has the login <ваш @юзернейм> and the phone number <привязанный номер телефона>. I plan to set up a bridge to communicate with my friends using the Meshtastic LoRa radio network. I've tried using a bot instead, but the issue is that messages from other bots added to the conversation are not available through the bot_api, so I decided to try using the library to work directly with the account. I'm writing to your inbox because, for example, the MadelineProto documentation recommended notifying Telegram about using automation on the account to prevent false positives and account blocking. Thanks!
 
-После этого можно производить настройку.
+### После этого можно производить настройку.
 
-При первом запуске создаёт шаблонный файл конфигурации `mesh_telethon_config.json`, который необходимо настроить под себя. Описание параметров можно взять из кода скрипта.
+При первом запуске создаётся шаблонный файл конфигурации `mesh_telethon_config.json`, который необходимо настроить под себя. Описание параметров можно взять из кода скрипта.
 
 Далее, при перезапуске, будет произведена попытка входа в учётную запись Telegram. Понадобится указать номер телефона в формате +7XXXXXXXXXX (без пробелов), затем ввести проверочный код (поступит либо по СМС, либо в сам Telegram от сервисного аккаунта).
 
