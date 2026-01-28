@@ -44,7 +44,7 @@ DEFAULT_CONFIG = {
             "prepoll_url": [ # эти коллбэки выполняются перед запуском скрипта
                 # "", ""
             ], 
-            "send_updates_to": "https://...?token=aaaaaa", # куда сгружать полученные от TG обновления, https://... Отправляется POST с телом {"token": "...", "message": {"text": "...", "message_id": "...", chat: {"id": "..."}, "from": {"username": "...", "first_name": "...", "last_name": "..."}, "date": ...unix}}. Токен можено передать не в JSON-теле, а в get-параметре, указав его в самой ссылке 
+            "send_updates_to": "https://...?token=aaaaaa", # куда сгружать полученные от TG обновления, https://... Токен можно передать не в get-параметре, указав его в самой ссылке, а в JSON-теле. Отправляется POST с телом {"token": "...", "message": {"text": "...", "message_id": "...", chat: {"id": "..."}, "from": {"username": "...", "first_name": "...", "last_name": "..."}, "date": ...unix}} 
             "poll_replies_from": "", # откуда забирать ответные сообщения, отправляемые в TG https://... Ожидается ответ вида {"messages":[{"name":"Alice","date":"18.01 19:44","msg":"Foo","chat_id": "-10055555555"},{"name":"Bob","date":"18.01 19:44","msg":"Bar","chat_id": "-10055555555"}]}
             "poll_period_seconds": 30, # период, с которым опрашивается poll_replies_from
             "http_ignore_ssl_errors": False, 
@@ -535,6 +535,7 @@ async def main():
             return
         
         # соединяемся
+        await client.start()
         await client.connect()
         if not await client.is_user_authorized():
             # Handle sign-in flow
