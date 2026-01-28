@@ -67,3 +67,49 @@ Python-скрипт для трансляции сообщений в/из Teleg
 - Для повышенной защиты сетевого соединения с Telegram поддерживается подключение через socks5-прокси. Настраивается в конфиге, секции `proxy_*` и флаг `use_proxy`.
   
 - Для дедупликации транслируемых в Telegram сообщений из внешней системы используется внутренний кэш отправленных сообщений, в котором хранится хэш каждого переданного в отправку сообщения, созданный из `chat_id+date+msg`. Кэш хранится в оперативной памяти, время жизни каждой записи указывается в `sent_to_tg_cache_ttl`, проверка кэша запускается с каждым успешным polling-запросом, в котором мы получили сообщения.
+- Переменная `http_ignore_ssl_errors` полезна, если, например, используется php-версия бэкенда, развёрнутая на локальном сервере.
+- Пример настроенного конфига:
+
+```
+{
+  "api_id": 123456,
+  "api_hash": "45sd56f44fs5dfdfsf",
+  "api_login": "My_Awesome_Login",
+  "use_proxy": true,
+  "proxy_type": "socks5",
+  "proxy_addr": "1.2.3.4",
+  "proxy_port": 4221,
+  "proxy_username": "Telethon",
+  "proxy_password": "d$#%sdGvvz",
+  "proxy_rdns": true,
+  "tg_chats_configs": [
+    {
+      "chat_id": "-1005555555555",
+      "chat_alias_faked": "Эта переменная просто для читабельности - здесь можно подписать название конфига, например, указав название группы выше",
+      "http_extpoll_token": "токен-для-prepoll_url-и-poll_replies_from",
+      "http_send_token": "токен-для-send_updates_to",
+      "prepoll_url": [
+        "http://127.0.0.1:12440?action=extpoll_delete_messages"
+      ],
+      "send_updates_to": "http://127.0.0.1:12440",
+      "poll_replies_from": "http://127.0.0.1:12440?action=extpoll_get_messages",
+      "poll_period_seconds": 5,
+      "http_ignore_ssl_errors": false
+    },
+    {
+      "chat_id": "@rove",
+      "chat_alias_faked": "Павел Дуров",
+      "http_extpoll_token": "fooooooooo",
+      "http_send_token": "baaaaaaaar",
+      "prepoll_url": [
+        "http://127.0.0.1:12440?action=extpoll_delete_messages"
+      ],
+      "send_updates_to": "http://127.0.0.1:12440",
+      "poll_replies_from": "http://127.0.0.1:12440?action=extpoll_get_messages",
+      "poll_period_seconds": 5,
+      "http_ignore_ssl_errors": false
+    }
+  ],
+  "sent_to_tg_cache_ttl": 600
+}
+```
