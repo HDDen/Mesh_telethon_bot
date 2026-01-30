@@ -50,7 +50,8 @@ DEFAULT_CONFIG = {
             "http_ignore_ssl_errors": False, 
         },
     ],
-    "sent_to_tg_cache_ttl": 600, # возможна ситуация, в которой одно сообщение может быть отправлено в тг несколькими воркерами, таким образом задвоив его. Чтобы этого не произошло, используется кэш _sent_to_tg_messages_cache, хранящий хэши отправленных сообщений. Настройка sent_to_tg_cache_ttl указывает, сколько времени хранить каждый хэш
+    "sent_to_tg_cache_ttl": 300, # возможна ситуация, в которой одно сообщение может быть отправлено в тг несколькими воркерами, таким образом задвоив его. Чтобы этого не произошло, используется кэш _sent_to_tg_messages_cache, хранящий хэши отправленных сообщений. Настройка sent_to_tg_cache_ttl указывает, сколько времени каждый хэш остаётся актуальным
+    "sent_to_tg_cache_key_elems": ["chat_id", "msg"], # из каких свойств сообщения составлять хэш
 }
 
 def load_or_create_config(path: str) -> dict:
@@ -89,6 +90,7 @@ proxy_password = _config.get("proxy_password", DEFAULT_CONFIG["proxy_password"])
 proxy_rdns = bool(_config.get("proxy_rdns", DEFAULT_CONFIG["proxy_rdns"]))
 tg_chats_configs = _config.get("tg_chats_configs", DEFAULT_CONFIG["tg_chats_configs"]) or None
 sent_to_tg_cache_ttl = int(_config.get("sent_to_tg_cache_ttl", DEFAULT_CONFIG["sent_to_tg_cache_ttl"]))
+sent_to_tg_cache_key_elems = _config.get("sent_to_tg_cache_key_elems", DEFAULT_CONFIG["sent_to_tg_cache_key_elems"])
 
 # кэш отправленных сообщений из poll в tg для дедупликации
 _sent_to_tg_messages_cache: Dict[str, float] = {}
@@ -490,9 +492,20 @@ def do_post_request(url: str, payload: Optional[dict] = None, timeout: int = 10,
 
 # возвращает хэш сообщения из chat_id, даты и текста
 def _make_message_key(msg_dict: dict) -> str:
-    raw = f"{msg_dict.get('chat_id','')}|{msg_dict.get('date','')}|{msg_dict.get('msg','')}"
-    normalized = " ".join(raw.split())
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    
+    try:
+        if sent_to_tg_cache_key_elems:
+            fields = sent_to_tg_cache_key_elems
+        else:
+            fields = ['chat_id', 'msg']
+            print(f"sent_to_tg_cache_key_elems пуст, сбросили до дефолтного \n{fields}")
+
+        raw = "|".join(str(msg_dict.get(field, "")) for field in fields)
+        normalized = " ".join(raw.split())
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    except Exception as e:
+        print(f"_make_message_key(): ошибка", e)
+        return ""
 
 # функция для поиска и удаления устаревших хэшей из кэша отправленных в tg сообщений
 async def _cleanup_sent_to_tg_messages_cache():
